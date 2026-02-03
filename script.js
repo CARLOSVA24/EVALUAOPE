@@ -94,6 +94,14 @@ function login() {
     aplicarPermisos();
 }
 
+function cerrarSesion() {
+    console.log("Cerrando sesión...");
+    localStorage.removeItem("logged");
+    localStorage.removeItem("logged_user");
+    localStorage.removeItem("user_role");
+    location.reload();
+}
+
 // ================= FUNCIONES DE SINCRONIZACIÓN =================
 async function linkDatabaseFile() {
     try {
