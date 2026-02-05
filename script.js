@@ -144,6 +144,7 @@ async function saveToFile() {
             ships: adminShips,
             costos: JSON.parse(localStorage.getItem('v16_costos')) || [],
             opName: localStorage.getItem('v16_opName'),
+            opMission: localStorage.getItem('v16_opMission'),
             opStatus: localStorage.getItem('v16_opStatus'),
             users: JSON.parse(localStorage.getItem('admin_users')) || USERS
         };
@@ -187,6 +188,7 @@ async function loadFromFile() {
         localStorage.setItem('admin_ships', JSON.stringify(adminShips));
         localStorage.setItem('v16_costos', JSON.stringify(data.costos || []));
         localStorage.setItem('v16_opName', data.opName || "");
+        localStorage.setItem('v16_opMission', data.opMission || "");
         localStorage.setItem('v16_opStatus', data.opStatus || "OPEN");
         localStorage.setItem('admin_users', JSON.stringify(data.users || USERS));
 
@@ -418,6 +420,11 @@ function saveOpName() {
     updateResumenSelector();
 }
 
+function saveOpMission() {
+    localStorage.setItem('v16_opMission', document.getElementById('opMission').value);
+    saveToFile();
+}
+
 function saveLIUNTA() {
     const idx = parseInt(document.getElementById('editIndexL').value);
     const data = { code: document.getElementById('ltCode').value, name: document.getElementById('ltName').value, weight: parseFloat(document.getElementById('ltWeight').value) };
@@ -440,6 +447,7 @@ function saveLIUNTA() {
 
 function renderLIUNTAS() {
     document.getElementById('opName').value = localStorage.getItem('v16_opName') || "";
+    document.getElementById('opMission').value = localStorage.getItem('v16_opMission') || "";
     document.querySelector('#tblLiuntas tbody').innerHTML = dbLIUNTAS.map((l, i) => `<tr><td><b>${l.code}</b></td><td>${l.name}</td><td>${l.weight}%</td><td><button class="btn btn-edit" onclick="editL(${i})">Editar</button><button class="btn btn-danger" onclick="delL(${i})">X</button></td></tr>`).join('');
 }
 
@@ -1250,6 +1258,16 @@ function generatePDF() {
         { align: "center" }
     );
 
+    // MISIÓN DE LA OPERACIÓN
+    const missionText = localStorage.getItem('v16_opMission') || "SIN MISIÓN DEFINIDA";
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    const splitMission = doc.splitTextToSize(`MISIÓN: ${missionText}`, pageWidth - 40);
+    doc.text(splitMission, pageWidth / 2, 48, { align: "center" });
+
+    // Ajustar startY de la tabla según el tamaño de la misión
+    const tableStartY = 55 + (splitMission.length > 1 ? (splitMission.length - 1) * 4 : 0);
+
     /* ================= CÁLCULO GLOBAL ================= */
     ships.forEach(ship => {
 
@@ -1278,7 +1296,7 @@ function generatePDF() {
 
     /* ================= TABLA GLOBAL ================= */
     doc.autoTable({
-        startY: 55,
+        startY: tableStartY,
         head: [['UNIDAD NAVAL', 'CALIFICACIÓN', 'HORAS', 'ESTADO']],
         body: ships.map((s, i) => {
             const resultado = shipScores[i].toFixed(2);
@@ -1366,15 +1384,42 @@ function generatePDF() {
 
 function updateOperationStatusUI() {
     const badge = document.getElementById('opStatusBadge');
+    const btnNewOp = document.getElementById('btnNewOp');
+    const btnNewOpTareas = document.getElementById('btnNewOpTareas');
     if (!badge) return;
 
     if (isOperationClosed()) {
         badge.innerHTML = "🔒 OPERACIÓN CERRADA";
         badge.style.color = "#c53030";
+        if (btnNewOp) btnNewOp.style.display = "block";
     } else {
         badge.innerHTML = "🟢 OPERACIÓN ABIERTA";
         badge.style.color = "#2f855a";
+        if (btnNewOp) btnNewOp.style.display = "none";
     }
+}
+
+function prepareNewOperation() {
+    if (!confirm("¿Está seguro de iniciar una NUEVA OPERACIÓN?\nEsto limpiará la configuración actual de tareas y ejercicios para permitir el ingreso de nueva información.")) {
+        return;
+    }
+
+    // Resetear datos de configuración
+    dbLIUNTAS = [];
+    dbEjercicios = [];
+
+    // Resetear metadatos de operación
+    localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS));
+    localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios));
+    localStorage.setItem('v16_opName', "");
+    localStorage.setItem('v16_opMission', "");
+    localStorage.setItem('v16_opStatus', 'OPEN');
+
+    // Sincronizar cambios si el archivo está vinculado
+    saveToFile();
+
+    alert("Sistema preparado para nueva información. Se reiniciará la página.");
+    location.reload();
 }
 window.onload = () => {
 
@@ -1701,7 +1746,15 @@ function generateReportPerShip() {
         doc.text(`Operación: ${opSel}`, 20, yPos);
         yPos += 5;
         doc.text(`Fecha Reporte: ${new Date().toLocaleDateString('es-ES')}`, 20, yPos);
-        yPos += 8;
+        yPos += 7;
+
+        // MISIÓN
+        const missionText = localStorage.getItem('v16_opMission') || "SIN MISIÓN DEFINIDA";
+        doc.setFontSize(9);
+        doc.setFont('Arial', 'italic');
+        const splitMission = doc.splitTextToSize(`Misión: ${missionText}`, pageWidth - 40);
+        doc.text(splitMission, 20, yPos);
+        yPos += (splitMission.length * 4) + 4;
 
         // Calcular eficacia y eficiencia del buque
         let obtenido = 0;
@@ -1898,7 +1951,15 @@ function generateReportGlobal() {
     doc.text(`Operación: ${opSel}`, 20, yPos);
     yPos += 5;
     doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, 20, yPos);
-    yPos += 8;
+    yPos += 7;
+
+    // MISIÓN
+    const missionText = localStorage.getItem('v16_opMission') || "SIN MISIÓN DEFINIDA";
+    doc.setFontSize(9);
+    doc.setFont('Arial', 'italic');
+    const splitMission = doc.splitTextToSize(`Misión: ${missionText}`, pageWidth - 40);
+    doc.text(splitMission, 20, yPos);
+    yPos += (splitMission.length * 4) + 4;
 
     // Resumen Global
     doc.setFont('Arial', 'bold');
@@ -2249,12 +2310,25 @@ function renderHistoricalReport() {
 
         let totalTime = 0;
         let totalCost = 0;
+        let sumEficacia = 0;
+        let sumEficiencia = 0;
         let filas = '';
+        const labels = [];
+        const dataEficacia = [];
+        const dataEficiencia = [];
+        const dataCostos = [];
 
         ops.forEach(op => {
             const opStats = calculateOpStats(op);
             totalTime += opStats.totalTime;
             totalCost += opStats.totalCost;
+            sumEficacia += opStats.eficacia;
+            sumEficiencia += opStats.eficiencia;
+
+            labels.push(op);
+            dataEficacia.push(opStats.eficacia);
+            dataEficiencia.push(opStats.eficiencia);
+            dataCostos.push(opStats.totalCost);
 
             filas += `
                  <tr>
@@ -2267,17 +2341,33 @@ function renderHistoricalReport() {
              `;
         });
 
+        const avgEficaciaGlobal = (sumEficacia / ops.length).toFixed(1);
+        const avgEficienciaGlobal = (sumEficiencia / ops.length).toFixed(2);
+
         container.innerHTML = `
             <h4 style="color:var(--navy); border-bottom:1px solid #ccc; padding-bottom:5px;">CONSOLIDADO DE OPERACIONES</h4>
-            <div style="display:flex; justify-content:space-around; margin:15px 0;">
-                <div class="card" style="text-align:center; background:white;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:15px 0;">
+                <div class="card" style="text-align:center; background:white; border-bottom: 3px solid var(--info);">
                     <small>Operaciones</small>
-                    <div style="font-size:1.5rem; font-weight:bold;">${ops.length}</div>
+                    <div style="font-size:1.2rem; font-weight:bold;">${ops.length}</div>
                 </div>
-                <div class="card" style="text-align:center; background:white;">
+                <div class="card" style="text-align:center; background:white; border-bottom: 3px solid var(--danger);">
                      <small>Costo Histórico</small>
-                    <div style="font-size:1.5rem; font-weight:bold; color:var(--danger);">$${totalCost.toLocaleString('es-ES')}</div>
+                    <div style="font-size:1.2rem; font-weight:bold; color:var(--danger);">$${totalCost.toLocaleString('es-ES')}</div>
                 </div>
+                <div class="card" style="text-align:center; background:white; border-bottom: 3px solid var(--navy);">
+                    <small>Eficacia Media</small>
+                    <div style="font-size:1.2rem; font-weight:bold; color:var(--navy);">${avgEficaciaGlobal}%</div>
+                </div>
+                <div class="card" style="text-align:center; background:white; border-bottom: 3px solid var(--success);">
+                    <small>Eficiencia Media</small>
+                    <div style="font-size:1.2rem; font-weight:bold; color:var(--success);">${avgEficienciaGlobal}%</div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:20px;">
+                <h4>Comparativa de Operaciones</h4>
+                <canvas id="chartHistoryConsolidado" style="max-height:300px;"></canvas>
             </div>
             <table class="w-full">
                 <thead style="background:var(--navy); color:white;">
@@ -2292,6 +2382,10 @@ function renderHistoricalReport() {
                 <tbody>${filas}</tbody>
             </table>
         `;
+
+        setTimeout(() => {
+            renderHistoryConsolidadoChart(labels, dataEficacia, dataEficiencia, dataCostos);
+        }, 100);
 
     } else {
         // REPORTE INDIVIDUAL DE OPERACIÓN CERRADA
@@ -2315,6 +2409,11 @@ function renderHistoricalReport() {
                 </div>
             </div>
 
+            <div class="card" style="margin-bottom:20px;">
+                <h4>Desempeño por Unidad</h4>
+                <canvas id="chartHistoryOp" style="max-height:300px;"></canvas>
+            </div>
+
             <h5>Detalle de Unidades Participantes</h5>
             <table>
                 <thead>
@@ -2335,6 +2434,10 @@ function renderHistoricalReport() {
                 </tbody>
             </table>
         `;
+
+        setTimeout(() => {
+            renderHistoryOpChart(stats.details);
+        }, 100);
     }
 }
 
@@ -2510,4 +2613,136 @@ function printHistoricalReport() {
     }
 
     doc.save(`Reporte_Historico_${currentHistoryForce}_${opSel}.pdf`);
+}
+
+let chartHistoryConsolidadoRef = null;
+function renderHistoryConsolidadoChart(labels, eficacias, eficiencias, costos) {
+    const ctx = document.getElementById('chartHistoryConsolidado');
+    if (!ctx) return;
+
+    if (chartHistoryConsolidadoRef) chartHistoryConsolidadoRef.destroy();
+
+    chartHistoryConsolidadoRef = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Eficacia (%)',
+                    data: eficacias,
+                    backgroundColor: '#1a365d',
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Eficiencia (%)',
+                    data: eficiencias,
+                    backgroundColor: '#2f855a',
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Costo ($)',
+                    data: costos,
+                    type: 'line',
+                    borderColor: '#c53030',
+                    borderWidth: 2,
+                    pointBackgroundColor: '#c53030',
+                    fill: false,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    max: 100,
+                    title: { display: true, text: 'Porcentaje (%)' }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'Costo ($)' },
+                    ticks: {
+                        callback: function (value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+let chartHistoryOpRef = null;
+function renderHistoryOpChart(details) {
+    const ctx = document.getElementById('chartHistoryOp');
+    if (!ctx) return;
+
+    if (chartHistoryOpRef) chartHistoryOpRef.destroy();
+
+    chartHistoryOpRef = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: details.map(d => d.name),
+            datasets: [
+                {
+                    label: 'Eficacia (%)',
+                    data: details.map(d => d.eficacia),
+                    backgroundColor: '#1a365d',
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Eficiencia (%)',
+                    data: details.map(d => d.eficiencia),
+                    backgroundColor: '#2f855a',
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Costo ($)',
+                    data: details.map(d => d.costo),
+                    type: 'line',
+                    borderColor: '#c53030',
+                    borderWidth: 2,
+                    pointBackgroundColor: '#c53030',
+                    fill: false,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    max: 100,
+                    title: { display: true, text: 'Porcentaje (%)' }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'Costo ($)' },
+                    ticks: {
+                        callback: function (value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
