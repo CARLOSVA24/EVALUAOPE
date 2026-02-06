@@ -13,6 +13,28 @@ let fileHandle = null;
 let lastSyncTime = 0;
 let syncInterval = null;
 
+// Microsoft Graph API (MSAL) Config
+const msalConfig = {
+    auth: {
+        clientId: "YOUR_CLIENT_ID_HERE", // EL USUARIO DEBE REEMPLAZAR ESTO
+        authority: "https://login.microsoftonline.com/common",
+        redirectUri: window.location.origin + window.location.pathname
+    },
+    cache: {
+        cacheLocation: "localStorage",
+        storeAuthStateInCookie: true,
+    }
+};
+
+let myMSALObj = null;
+if (typeof msal !== 'undefined') {
+    myMSALObj = new msal.PublicClientApplication(msalConfig);
+}
+
+let syncMode = 'LOCAL'; // 'LOCAL' (File Picker) o 'CLOUD' (Graph API)
+let accessToken = null;
+let cloudFileId = null;
+
 function getAlphaBeta() {
     if (document.getElementById('tactico-superficie')?.classList.contains('active'))
         return OP_WEIGHTS.TACTICO;
@@ -133,119 +155,179 @@ async function linkDatabaseFile() {
     }
 }
 
-async function saveToFile() {
-    if (!fileHandle) return;
+// 1. ESTRATEGIA DE COMBINACIÓN ROBUSTA (MERGE)
+const mergeArrays = (local, remote, keyProp = null) => {
+    const combined = [...(remote || []), ...(local || [])];
+    const seen = new Set();
+    return combined.filter(item => {
+        const val = keyProp ? item[keyProp] : JSON.stringify(item);
+        if (seen.has(val)) return false;
+        seen.add(val);
+        return true;
+    });
+};
 
-    try {
-        // 1. CARGAR DATOS MÁS RECIENTES DEL ARCHIVO PARA COMBINAR
-        const file = await fileHandle.getFile();
-        const text = await file.text();
-        let remoteData = {};
-        if (text) {
-            try {
-                remoteData = JSON.parse(text);
-            } catch (e) {
-                console.error("Error parseando datos remotos:", e);
-            }
+async function syncData(remoteData = null) {
+    // Si no hay remoteData, intentamos cargarlo según el modo
+    if (!remoteData) {
+        if (syncMode === 'LOCAL' && fileHandle) {
+            const file = await fileHandle.getFile();
+            const text = await file.text();
+            remoteData = text ? JSON.parse(text) : {};
+        } else if (syncMode === 'CLOUD' && accessToken) {
+            remoteData = await loadFromCloud();
         }
+    }
 
-        // 2. ESTRATEGIA DE COMBINACIÓN (MERGE)
-        // Combinamos logs y costos basados en una comparación de contenido (como identificador único)
-        const mergeArrays = (local, remote) => {
-            const seen = new Set();
-            const result = [];
-            [...(remote || []), ...(local || [])].forEach(item => {
-                const key = JSON.stringify(item);
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    result.push(item);
-                }
-            });
-            return result;
-        };
+    if (!remoteData) return;
 
-        const mergedLogs = mergeArrays(logs, remoteData.logs);
-        const mergedCostos = mergeArrays(JSON.parse(localStorage.getItem('v16_costos')) || [], remoteData.costos);
+    // MERGE DE CADA ENTIDAD
+    dbLIUNTAS = mergeArrays(dbLIUNTAS, remoteData.liuntas, 'code');
+    dbEjercicios = mergeArrays(dbEjercicios, remoteData.ejercicios, 'name');
+    adminShips = mergeArrays(adminShips, remoteData.ships); // Son strings simples
+    logs = mergeArrays(logs, remoteData.logs);
+    audit = mergeArrays(audit, remoteData.audit);
 
-        // 3. PREPARAR OBJETO FINAL
-        const data = {
-            liuntas: dbLIUNTAS.length >= (remoteData.liuntas || []).length ? dbLIUNTAS : remoteData.liuntas,
-            ejercicios: dbEjercicios.length >= (remoteData.ejercicios || []).length ? dbEjercicios : remoteData.ejercicios,
-            logs: mergedLogs,
-            ships: adminShips.length >= (remoteData.ships || []).length ? adminShips : remoteData.ships,
-            costos: mergedCostos,
-            opName: localStorage.getItem('v16_opName') || remoteData.opName,
-            opMission: localStorage.getItem('v16_opMission') || remoteData.opMission,
-            opStatus: localStorage.getItem('v16_opStatus') || remoteData.opStatus,
-            users: JSON.parse(localStorage.getItem('admin_users')) || remoteData.users || USERS
-        };
+    const localCostos = JSON.parse(localStorage.getItem('v16_costos')) || [];
+    const mergedCostos = mergeArrays(localCostos, remoteData.costos);
 
-        // 4. GUARDAR
+    // Metadatos de operación
+    const opName = localStorage.getItem('v16_opName') || remoteData.opName || "";
+    const opMission = localStorage.getItem('v16_opMission') || remoteData.opMission || "";
+    const opStatus = localStorage.getItem('v16_opStatus') || remoteData.opStatus || "OPEN";
+    const remoteUsers = remoteData.users || USERS;
+    const currentUsers = JSON.parse(localStorage.getItem('admin_users')) || USERS;
+    const mergedUsers = mergeArrays(currentUsers, remoteUsers, 'user');
+
+    // PREPARAR OBJETO FINAL
+    const finalData = {
+        liuntas: dbLIUNTAS,
+        ejercicios: dbEjercicios,
+        logs: logs,
+        ships: adminShips,
+        costos: mergedCostos,
+        opName,
+        opMission,
+        opStatus,
+        users: mergedUsers,
+        audit: audit
+    };
+
+    const dataString = JSON.stringify(finalData);
+    if (localStorage.getItem('last_sync_payload') === dataString) {
+        updateSyncUI(true);
+        return; // No hubo cambios reales
+    }
+    localStorage.setItem('last_sync_payload', dataString);
+
+    // GUARDAR LOCALMENTE
+    localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS));
+    localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios));
+    localStorage.setItem('v16_logs', JSON.stringify(logs));
+    localStorage.setItem('admin_ships', JSON.stringify(adminShips));
+    localStorage.setItem('v16_costos', JSON.stringify(mergedCostos));
+    localStorage.setItem('v16_opName', opName);
+    localStorage.setItem('v16_opMission', opMission);
+    localStorage.setItem('v16_opStatus', opStatus);
+    localStorage.setItem('admin_users', JSON.stringify(mergedUsers));
+    localStorage.setItem('audit_log', JSON.stringify(audit));
+
+    // GUARDAR REMOTAMENTE
+    if (syncMode === 'LOCAL' && fileHandle) {
         const writable = await fileHandle.createWritable();
-        await writable.write(JSON.stringify(data, null, 2));
+        await writable.write(JSON.stringify(finalData, null, 2));
         await writable.close();
-
-        // Actualizar variables locales con los datos combinados para estar en sintonía
-        logs = mergedLogs;
-        localStorage.setItem('v16_logs', JSON.stringify(logs));
-        localStorage.setItem('v16_costos', JSON.stringify(mergedCostos));
-
         const updatedFile = await fileHandle.getFile();
         lastSyncTime = updatedFile.lastModified;
+    } else if (syncMode === 'CLOUD' && accessToken) {
+        await saveToCloud(finalData);
+    }
 
-        console.log("Sincronización de subida (Merge) completada.");
+    updateSyncUI(true);
+    refreshUI();
+}
 
+function refreshUI() {
+    if (localStorage.getItem('logged') === 'true') {
+        updateDashboard();
+        refreshSelectors();
+        if (typeof renderEficiencia === 'function') renderEficiencia();
+        if (typeof renderOperationalSummary === 'function') renderOperationalSummary();
+        if (typeof renderResumen === 'function') renderResumen();
+        updateOperationStatusUI();
+    }
+}
+
+async function saveToFile() {
+    if (syncMode === 'LOCAL' && !fileHandle) {
+        // No alertar en cada pequeño cambio si no está vinculado para no molestar
+        console.log("Cambio guardado localmente (PC no vinculada)");
+        return;
+    }
+    if (syncMode === 'CLOUD' && !accessToken) {
+        console.log("Cambio guardado localmente (Nube no iniciada)");
+        return;
+    }
+    await syncData();
+}
+
+// La función anterior fue eliminada para evitar duplicidad.
+
+// ================= FUNCIONES CLOUD (GRAPH API) =================
+async function loginOneDrive() {
+    if (!myMSALObj) return alert("Error: MSAL no cargado.");
+    try {
+        const loginResponse = await myMSALObj.loginPopup({
+            scopes: ["User.Read", "Files.ReadWrite"]
+        });
+        accessToken = loginResponse.accessToken;
+        syncMode = 'CLOUD';
+        logAction("Sesión Cloud iniciada.");
+        await syncData();
+        startSyncPolling();
     } catch (err) {
-        console.error("Error al guardar en archivo:", err);
+        console.error("Error Login Cloud:", err);
+    }
+}
+
+async function saveToCloud(data) {
+    try {
+        const response = await fetch("https://graph.microsoft.com/v1.0/me/drive/root:/RESPALDO_CODESC.json:/content", {
+            method: "PUT",
+            headers: {
+                "Authorization": `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(data, null, 2)
+        });
+        if (!response.ok) throw new Error("Error al guardar en nube");
+    } catch (err) {
+        console.error("Cloud Save Error:", err);
+    }
+}
+
+async function loadFromCloud() {
+    try {
+        const response = await fetch("https://graph.microsoft.com/v1.0/me/drive/root:/RESPALDO_CODESC.json:/content", {
+            headers: { "Authorization": `Bearer ${accessToken}` }
+        });
+        if (response.status === 404) return {}; // Si no existe, devolvemos objeto vacío
+        if (!response.ok) throw new Error("Error al cargar de nube");
+        return await response.json();
+    } catch (err) {
+        console.error("Cloud Load Error:", err);
+        return null;
     }
 }
 
 async function loadFromFile() {
-    if (!fileHandle) return;
-
-    try {
+    if (syncMode === 'LOCAL') {
+        if (!fileHandle) return;
         const file = await fileHandle.getFile();
-
-        // Si el archivo no ha cambiado, no recargar
         if (file.lastModified <= lastSyncTime) return;
-
-        const text = await file.text();
-        if (!text) return;
-
-        const data = JSON.parse(text);
-
-        // Actualizar variables en memoria
-        dbLIUNTAS = data.liuntas || [];
-        dbEjercicios = data.ejercicios || [];
-        logs = data.logs || [];
-        adminShips = data.ships || [];
-
-        // Actualizar localStorage para compatibilidad
-        localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS));
-        localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios));
-        localStorage.setItem('v16_logs', JSON.stringify(logs));
-        localStorage.setItem('admin_ships', JSON.stringify(adminShips));
-        localStorage.setItem('v16_costos', JSON.stringify(data.costos || []));
-        localStorage.setItem('v16_opName', data.opName || "");
-        localStorage.setItem('v16_opMission', data.opMission || "");
-        localStorage.setItem('v16_opStatus', data.opStatus || "OPEN");
-        localStorage.setItem('admin_users', JSON.stringify(data.users || USERS));
-
-        lastSyncTime = file.lastModified;
-
-        // Refrescar UI (solo si estamos logueados)
-        if (localStorage.getItem('logged') === 'true') {
-            updateDashboard();
-            refreshSelectors();
-            if (typeof renderEficiencia === 'function') renderEficiencia(); // Paso 5
-            if (typeof renderOperationalSummary === 'function') renderOperationalSummary();
-            if (typeof renderHistoricalSelectors === 'function') renderHistoricalSelectors();
-            if (typeof updateOperationStatusUI === 'function') updateOperationStatusUI();
-            if (typeof renderResumen === 'function') renderResumen(); // Paso 6
-        }
-
-    } catch (err) {
-        console.error("Error al cargar desde archivo:", err);
+        await syncData();
+    } else if (syncMode === 'CLOUD' && accessToken) {
+        await syncData();
     }
 }
 
@@ -257,16 +339,17 @@ function startSyncPolling() {
 function updateSyncUI(linked) {
     const dot = document.getElementById('syncDot');
     const text = document.getElementById('syncText');
-    const btn = document.getElementById('btnLinkSync');
+    const btnLocal = document.getElementById('btnLinkSync');
+    const btnCloud = document.getElementById('btnCloudSync');
 
     if (linked) {
         dot.style.background = "#48bb78"; // Verde
-        text.innerText = "SINCRONIZADO";
-        btn.innerText = "🔄 CAMBIAR VINCULO";
+        text.innerText = syncMode === 'LOCAL' ? "SYNC OK (PC)" : "SYNC OK (NUBE)";
+        if (btnLocal) btnLocal.innerText = syncMode === 'LOCAL' ? "🔄 CAMBIAR" : "🔗 VINCULAR PC";
+        if (btnCloud) btnCloud.innerText = syncMode === 'CLOUD' ? "🔄 RECONECTAR" : "☁️ USAR NUBE";
     } else {
         dot.style.background = "#718096"; // Gris
         text.innerText = "SIN VINCULAR";
-        btn.innerText = "🔗 VINCULAR ONEDRIVE";
     }
 }
 
@@ -1228,9 +1311,9 @@ function editE(i) { const e = dbEjercicios[i]; document.getElementById('exUntlPa
 function resetFormE() { document.getElementById('editIndexE').value = -1; document.getElementById('exName').value = ''; document.getElementById('exWeight').value = ''; }
 function editLog(i) { const l = logs[i]; document.getElementById('evShip').value = l.ship; document.getElementById('evExSelect').value = l.ex; document.getElementById('evScore').value = l.score; document.getElementById('evDate').value = l.date; document.getElementById('evTime').value = l.time || l.hours; document.getElementById('evObs').value = l.obs || ""; document.getElementById('editIndexLog').value = i; }
 function resetFormLog() { document.getElementById('editIndexLog').value = -1; document.getElementById('evScore').value = ''; document.getElementById('evDate').value = ''; document.getElementById('evTime').value = ''; document.getElementById('evObs').value = ''; }
-function delL(i) { dbLIUNTAS.splice(i, 1); localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS)); renderLIUNTAS(); }
-function delE(i) { dbEjercicios.splice(i, 1); localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios)); renderEjercicios(); }
-function delLog(i) { logs.splice(i, 1); localStorage.setItem('v16_logs', JSON.stringify(logs)); updateDashboard(); updateResumenSelector(); }
+function delL(i) { dbLIUNTAS.splice(i, 1); localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS)); renderLIUNTAS(); saveToFile(); }
+function delE(i) { dbEjercicios.splice(i, 1); localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios)); renderEjercicios(); saveToFile(); }
+function delLog(i) { logs.splice(i, 1); localStorage.setItem('v16_logs', JSON.stringify(logs)); updateDashboard(); updateResumenSelector(); saveToFile(); }
 
 // PDF (ACTUALIZADO CON NOVEDADES)
 
@@ -2793,4 +2876,3 @@ function renderHistoryOpChart(details) {
         }
     });
 }
-
