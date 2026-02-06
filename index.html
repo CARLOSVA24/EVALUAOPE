@@ -8,6 +8,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="styles.css">
+    <!-- Microsoft Authentication Library -->
+    <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
 </head>
 
 <body>
@@ -101,7 +103,24 @@
                         box-shadow: 0 2px 5px rgba(0,0,0,0.2);
                         transition: 0.2s;
                     ">
-                        🔗 VINCULAR ONEDRIVE
+                        🔗 VINCULAR ONEDRIVE (PC)
+                    </button>
+                    <button id="btnCloudSync" onclick="loginOneDrive()" style="
+                        width: 100%;
+                        padding: 12px;
+                        background: #0078d4;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        font-weight: 900;
+                        cursor: pointer;
+                        font-size: 0.85em;
+                        text-transform: uppercase;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                        transition: 0.2s;
+                        margin-top: 10px;
+                    ">
+                        ☁️ NUBE ONEDRIVE (MÓVIL)
                     </button>
                 </div>
             </div>
@@ -747,5 +766,4 @@
     <script src="script.js"></script>
 </body>
 
-</html>
 </html>
