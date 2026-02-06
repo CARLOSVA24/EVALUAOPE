@@ -137,24 +137,63 @@ async function saveToFile() {
     if (!fileHandle) return;
 
     try {
-        const data = {
-            liuntas: dbLIUNTAS,
-            ejercicios: dbEjercicios,
-            logs: logs,
-            ships: adminShips,
-            costos: JSON.parse(localStorage.getItem('v16_costos')) || [],
-            opName: localStorage.getItem('v16_opName'),
-            opMission: localStorage.getItem('v16_opMission'),
-            opStatus: localStorage.getItem('v16_opStatus'),
-            users: JSON.parse(localStorage.getItem('admin_users')) || USERS
+        // 1. CARGAR DATOS MÁS RECIENTES DEL ARCHIVO PARA COMBINAR
+        const file = await fileHandle.getFile();
+        const text = await file.text();
+        let remoteData = {};
+        if (text) {
+            try {
+                remoteData = JSON.parse(text);
+            } catch (e) {
+                console.error("Error parseando datos remotos:", e);
+            }
+        }
+
+        // 2. ESTRATEGIA DE COMBINACIÓN (MERGE)
+        // Combinamos logs y costos basados en una comparación de contenido (como identificador único)
+        const mergeArrays = (local, remote) => {
+            const seen = new Set();
+            const result = [];
+            [...(remote || []), ...(local || [])].forEach(item => {
+                const key = JSON.stringify(item);
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    result.push(item);
+                }
+            });
+            return result;
         };
 
+        const mergedLogs = mergeArrays(logs, remoteData.logs);
+        const mergedCostos = mergeArrays(JSON.parse(localStorage.getItem('v16_costos')) || [], remoteData.costos);
+
+        // 3. PREPARAR OBJETO FINAL
+        const data = {
+            liuntas: dbLIUNTAS.length >= (remoteData.liuntas || []).length ? dbLIUNTAS : remoteData.liuntas,
+            ejercicios: dbEjercicios.length >= (remoteData.ejercicios || []).length ? dbEjercicios : remoteData.ejercicios,
+            logs: mergedLogs,
+            ships: adminShips.length >= (remoteData.ships || []).length ? adminShips : remoteData.ships,
+            costos: mergedCostos,
+            opName: localStorage.getItem('v16_opName') || remoteData.opName,
+            opMission: localStorage.getItem('v16_opMission') || remoteData.opMission,
+            opStatus: localStorage.getItem('v16_opStatus') || remoteData.opStatus,
+            users: JSON.parse(localStorage.getItem('admin_users')) || remoteData.users || USERS
+        };
+
+        // 4. GUARDAR
         const writable = await fileHandle.createWritable();
         await writable.write(JSON.stringify(data, null, 2));
         await writable.close();
 
-        const file = await fileHandle.getFile();
-        lastSyncTime = file.lastModified;
+        // Actualizar variables locales con los datos combinados para estar en sintonía
+        logs = mergedLogs;
+        localStorage.setItem('v16_logs', JSON.stringify(logs));
+        localStorage.setItem('v16_costos', JSON.stringify(mergedCostos));
+
+        const updatedFile = await fileHandle.getFile();
+        lastSyncTime = updatedFile.lastModified;
+
+        console.log("Sincronización de subida (Merge) completada.");
 
     } catch (err) {
         console.error("Error al guardar en archivo:", err);
@@ -198,6 +237,11 @@ async function loadFromFile() {
         if (localStorage.getItem('logged') === 'true') {
             updateDashboard();
             refreshSelectors();
+            if (typeof renderEficiencia === 'function') renderEficiencia(); // Paso 5
+            if (typeof renderOperationalSummary === 'function') renderOperationalSummary();
+            if (typeof renderHistoricalSelectors === 'function') renderHistoricalSelectors();
+            if (typeof updateOperationStatusUI === 'function') updateOperationStatusUI();
+            if (typeof renderResumen === 'function') renderResumen(); // Paso 6
         }
 
     } catch (err) {
@@ -317,12 +361,12 @@ function showInternalTab(id, element) {
 
     // VALIDACIÓN: Si intenta ir a Evaluaciones, verificar que todos los buques tengan costos registrados
     if (id === 'eficacia') {
-        const opActual = localStorage.getItem('v16_opName') || '';
+        const opActual = (localStorage.getItem('v16_opName') || '').toUpperCase();
         const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
         const buequesSinCostos = [];
 
         adminShips.forEach(buque => {
-            const costosDelBuque = costos.filter(c => c.operacion === opActual && c.buque === buque);
+            const costosDelBuque = costos.filter(c => (c.operacion || '').toUpperCase() === opActual && (c.buque || '').toUpperCase() === buque.toUpperCase());
             if (costosDelBuque.length === 0) {
                 buequesSinCostos.push(buque);
             }
@@ -341,12 +385,12 @@ function showInternalTab(id, element) {
 
     // VALIDACIÓN: Si intenta ir a Resumen, verificar que todos los buques tengan evaluaciones registradas
     if (id === 'resumen') {
-        const opActual = localStorage.getItem('v16_opName') || '';
-        const evaluaciones = logs.filter(l => l.opName === opActual);
+        const opActual = (localStorage.getItem('v16_opName') || '').toUpperCase();
+        const evaluaciones = logs.filter(l => (l.opName || '').toUpperCase() === opActual);
         const buequesSinEvaluaciones = [];
 
         adminShips.forEach(buque => {
-            const evaluacionesDelBuque = evaluaciones.filter(e => e.ship === buque);
+            const evaluacionesDelBuque = evaluaciones.filter(e => (e.ship || '').toUpperCase() === buque.toUpperCase());
             if (evaluacionesDelBuque.length === 0) {
                 buequesSinEvaluaciones.push(buque);
             }
@@ -414,7 +458,8 @@ function showInternalTab(id, element) {
 
 // LÓGICA PASO 1 Y 2 (SIN CAMBIOS)
 function saveOpName() {
-    localStorage.setItem('v16_opName', document.getElementById('opName').value);
+    const val = document.getElementById('opName').value.trim().toUpperCase();
+    localStorage.setItem('v16_opName', val);
     localStorage.setItem('v16_opStatus', 'OPEN');
     saveToFile();
     updateResumenSelector();
@@ -533,7 +578,7 @@ function renderCosts() {
 
     tbody.innerHTML = '';
 
-    const opName = localStorage.getItem('v16_opName');
+    const opName = (localStorage.getItem('v16_opName') || '').toUpperCase();
     if (!opName) return;
 
     const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
@@ -543,7 +588,7 @@ function renderCosts() {
     let totalOp = 0;
 
     costos.forEach((costo, index) => {
-        if (costo.operacion !== opName) return;
+        if ((costo.operacion || '').toUpperCase() !== opName) return;
 
         // Si se requiere filtrar por buque descomentar. Pero el usuario quiere ver "COSTO TOTAL DE LA OPERACIÓN"
         // if (selectedShip && costo.buque !== selectedShip) return;
@@ -597,16 +642,18 @@ function deleteCost(index) {
 }
 
 function getOperacionCostoTotal(opName) {
+    const targetOp = (opName || "").toUpperCase();
     const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
     return costos
-        .filter(c => c.operacion === opName)
+        .filter(c => (c.operacion || "").toUpperCase() === targetOp)
         .reduce((sum, c) => sum + (c.monto || 0), 0);
 }
 
 function getBuqueCostoTotal(opName, buque) {
+    const targetOp = (opName || "").toUpperCase();
     const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
     return costos
-        .filter(c => c.operacion === opName && c.buque === buque)
+        .filter(c => (c.operacion || "").toUpperCase() === targetOp && (c.buque || "").toUpperCase() === buque.toUpperCase())
         .reduce((sum, c) => sum + (c.monto || 0), 0);
 }
 function calcularEficiencia(eficacia, costoTotal) {
@@ -676,7 +723,7 @@ function updateDashboard() {
     const opLogs = logs.filter(l => l.opName === currentOp);
 
     const shipData = adminShips.map(s => {
-        const sLogs = opLogs.filter(l => l.ship === s);
+        const sLogs = opLogs.filter(l => (l.ship || '').toUpperCase() === s.toUpperCase());
         let obtenido = 0;
         let maximo = 0;
 
@@ -790,16 +837,16 @@ function resetSystem() { if (confirm("¿Seguro? Se borrará TODA la información
 
 // RESUMEN (SIN CAMBIOS)
 function updateResumenSelector() {
-    const ops = [...new Set(logs.map(l => l.opName))];
-    const current = localStorage.getItem('v16_opName');
+    const ops = [...new Set(logs.map(l => (l.opName || "").toUpperCase()))];
+    const current = (localStorage.getItem('v16_opName') || "").toUpperCase();
     if (current && !ops.includes(current)) ops.push(current);
     const sel = document.getElementById('resumenOpSelector');
     if (sel) sel.innerHTML = ops.map(o => `<option value="${o}" ${o === current ? 'selected' : ''}>${o}</option>`).join('');
 }
 
 function updateIntegralOpSelector() {
-    const ops = [...new Set(logs.map(l => l.opName))].filter(Boolean);
-    const current = localStorage.getItem('v16_opName') || "";
+    const ops = [...new Set(logs.map(l => (l.opName || "").toUpperCase()))].filter(Boolean);
+    const current = (localStorage.getItem('v16_opName') || "").toUpperCase();
     if (current && !ops.includes(current)) ops.push(current);
 
     const sel = document.getElementById('integralOpSelector');
@@ -827,8 +874,8 @@ function renderResumen() {
 
     // ===== TIEMPO TOTAL POR BUQUE (SUMA DE TIEMPOS DE EJERCICIOS) =====
     const shipTimes = shipsList.map(s => {
-        const sLogs = opLogs.filter(l => l.ship === s);
-        return sLogs.reduce((sum, l) => sum + (l.time || 0), 0);
+        const sLogs = opLogs.filter(l => (l.ship || '').toUpperCase() === s.toUpperCase());
+        return sLogs.reduce((sum, l) => sum + (l.time || l.hours || 0), 0);
     });
 
     // ===== COSTO TOTAL POR BUQUE (DESDE DB COSTOS) =====
@@ -846,7 +893,7 @@ function renderResumen() {
     const minCost = validCosts.length > 0 ? Math.min(...validCosts) : 0;
 
     const shipResults = shipsList.map(s => {
-        const sLogs = opLogs.filter(l => l.ship === s);
+        const sLogs = opLogs.filter(l => (l.ship || '').toUpperCase() === s.toUpperCase());
         let obtenido = 0;
         let maximo = 0;
 
@@ -1001,17 +1048,17 @@ function renderResumen() {
 // FUNCIÓN PARA RENDERIZAR EFICIENCIA
 // FUNCIÓN PARA RENDERIZAR EFICIENCIA
 function renderEficiencia() {
-    const opActual = localStorage.getItem('v16_opName') || '';
-    const opLogs = logs.filter(l => l.opName === opActual);
+    const opActual = (localStorage.getItem('v16_opName') || '').toUpperCase();
+    const opLogs = logs.filter(l => (l.opName || '').toUpperCase() === opActual);
     const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
 
     // Pre-calcular minTime y minCost para normalización (basado en min/actual)
     const allShipTimes = adminShips.map(b => {
-        const logs = opLogs.filter(l => l.ship === b);
-        return logs.reduce((sum, l) => sum + (l.time || 0), 0);
+        const logs = opLogs.filter(l => (l.ship || '').toUpperCase() === b.toUpperCase());
+        return logs.reduce((sum, l) => sum + (l.time || l.hours || 0), 0);
     });
     const allShipCosts = adminShips.map(b => {
-        const cst = costos.filter(c => c.operacion === opActual && c.buque === b);
+        const cst = costos.filter(c => (c.operacion || '').toUpperCase() === opActual && (c.buque || '').toUpperCase() === b.toUpperCase());
         return cst.reduce((sum, c) => sum + c.monto, 0);
     });
 
@@ -1023,8 +1070,8 @@ function renderEficiencia() {
 
     // Crear tabla de eficacia, costos y eficiencia por buque
     const dataBuques = adminShips.map((buque, i) => {
-        const evaluacionesBuque = opLogs.filter(l => l.ship === buque);
-        const costosBuque = costos.filter(c => c.operacion === opActual && c.buque === buque);
+        const evaluacionesBuque = opLogs.filter(l => (l.ship || '').toUpperCase() === buque.toUpperCase());
+        const costosBuque = costos.filter(c => (c.operacion || '').toUpperCase() === opActual && (c.buque || '').toUpperCase() === buque.toUpperCase());
 
         let eficacia = 0;
         let maximo = 0;
@@ -1132,8 +1179,8 @@ function renderEficiencia() {
     const detallesDiv = document.getElementById('detallesBuques');
     if (detallesDiv) {
         detallesDiv.innerHTML = adminShips.map(buque => {
-            const evaluacionesBuque = opLogs.filter(l => l.ship === buque);
-            const costosBuque = costos.filter(c => c.operacion === opActual && c.buque === buque);
+            const evaluacionesBuque = opLogs.filter(l => (l.ship || '').toUpperCase() === buque.toUpperCase());
+            const costosBuque = costos.filter(c => (c.operacion || '').toUpperCase() === opActual && (c.buque || '').toUpperCase() === buque.toUpperCase());
             const costoTotal = costosBuque.reduce((sum, c) => sum + c.monto, 0);
             const tiempoTotal = evaluacionesBuque.reduce((sum, e) => sum + (e.time || e.hours || 0), 0);
 
@@ -1271,7 +1318,7 @@ function generatePDF() {
     /* ================= CÁLCULO GLOBAL ================= */
     ships.forEach(ship => {
 
-        const shipLogs = logs.filter(l => l.ship === ship);
+        const shipLogs = logs.filter(l => (l.ship || '').toUpperCase() === ship.toUpperCase());
 
         let total = 0;
         let maximo = 0;
@@ -1290,7 +1337,7 @@ function generatePDF() {
 
     const shipHours = ships.map(ship =>
         logs
-            .filter(l => l.ship === ship)
+            .filter(l => (l.ship || '').toUpperCase() === ship.toUpperCase())
             .reduce((sum, l) => sum + (l.time || 0), 0)
     );
 
@@ -1325,7 +1372,7 @@ function generatePDF() {
     /* ================= DETALLE POR BUQUE ================= */
     ships.forEach(ship => {
 
-        const shipLogs = logs.filter(l => l.ship === ship);
+        const shipLogs = logs.filter(l => (l.ship || '').toUpperCase() === ship.toUpperCase());
         if (shipLogs.length === 0) return;
 
         doc.addPage();
@@ -2460,7 +2507,7 @@ function calculateOpStats(opName) {
         const sCosts = opCosts.filter(c => c.operacion === opName && c.buque === ship);
 
         const shipCost = sCosts.reduce((s, c) => s + c.monto, 0);
-        const shipTime = sLogs.reduce((s, l) => s + (l.time || 0), 0);
+        const shipTime = sLogs.reduce((s, l) => s + (l.time || l.hours || 0), 0);
 
         // Eficacia
         let obtenido = 0;
