@@ -2793,3 +2793,4 @@ function renderHistoryOpChart(details) {
         }
     });
 }
+
