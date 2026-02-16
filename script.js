@@ -251,6 +251,12 @@ function refreshUI() {
     if (localStorage.getItem('logged') === 'true') {
         updateDashboard();
         refreshSelectors();
+        renderUsers();
+        renderShips();
+        renderAir();
+        renderSub();
+        renderInf();
+        renderGuard();
         if (typeof renderEficiencia === 'function') renderEficiencia();
         if (typeof renderOperationalSummary === 'function') renderOperationalSummary();
         if (typeof renderResumen === 'function') renderResumen();
@@ -356,6 +362,10 @@ function updateSyncUI(linked) {
 
 let logs = JSON.parse(localStorage.getItem('v16_logs')) || [];
 let adminShips = JSON.parse(localStorage.getItem('admin_ships')) || [];
+let adminAir = JSON.parse(localStorage.getItem('admin_air')) || [];
+let adminSub = JSON.parse(localStorage.getItem('admin_sub')) || [];
+let adminInf = JSON.parse(localStorage.getItem('admin_inf')) || [];
+let adminGuard = JSON.parse(localStorage.getItem('admin_guard')) || [];
 let chartT, chartO, chartREficacia, chartREficiencia, chartEficacia, chartCostos, chartEficaciaEval, chartResumenEficacia, chartResumenEficiencia;
 
 
@@ -1064,6 +1074,22 @@ function renderResumen() {
     const estadoEficiencia = eficienciaOperativaGlobal >= 80 ? 'ÓPTIMO' : (eficienciaOperativaGlobal >= 70 ? 'RESTRINGIDO' : 'CRÍTICO');
     document.getElementById('resumenEficienciaStatusBox').innerText = estadoEficiencia;
 
+    // ===== CÁLCULO DE DESEMPEÑO (IDO) PONDERADO 60/40 =====
+    const eficVal = parseFloat(eficaciaGlobalVal) || 0;
+    const eficiVal = parseFloat(eficienciaOperativaGlobal) || 0;
+    const idoGlobalVal = (eficVal * 0.6) + (eficiVal * 0.4);
+
+    const idoLabel = document.getElementById('resumenIDOLabel');
+    if (idoLabel) {
+        idoLabel.innerText = idoGlobalVal.toFixed(1) + "%";
+        const idoBox = document.getElementById('resumenIDOStatusBox');
+        if (idoBox) {
+            const estadoIDO = idoGlobalVal >= 80 ? 'ÓPTIMO' : (idoGlobalVal >= 70 ? 'RESTRINGIDO' : 'CRÍTICO');
+            idoBox.innerText = `IDO: ${estadoIDO}`;
+            idoBox.style.background = idoGlobalVal >= 80 ? '#2f855a' : (idoGlobalVal >= 70 ? '#ecc94b' : '#c53030');
+        }
+    }
+
     /* ================== GRAFICO EFICACIA POR BUQUE ================== */
     const ctxEficacia = document.getElementById('chartResumenEficacia');
     if (ctxEficacia && shipResults.length > 0) {
@@ -1292,13 +1318,32 @@ function renderEficiencia() {
 // HELPERS
 function refreshSelectors() {
     const sP = document.getElementById('exUntlParent');
-    const sE = document.getElementById('evExSelect');
     const sS = document.getElementById('evShip');
     const sC = document.getElementById('costShip');
+    const sE = document.getElementById('evExSelect');
+
+    // Obtener la fuerza actual basada en el tab activo o el rol del usuario
+    let currentForce = 'SUPERFICIE'; // Default
+    const activeTab = document.querySelector('.tab-content.active');
+    if (activeTab) {
+        const id = activeTab.id;
+        if (id.includes('aviacion')) currentForce = 'AVIACION';
+        else if (id.includes('submarinos')) currentForce = 'SUBMARINOS';
+        else if (id.includes('infanteria')) currentForce = 'INFANTERIA';
+        else if (id.includes('guardacostas')) currentForce = 'GUARDACOSTAS';
+        else if (id.includes('superficie')) currentForce = 'SUPERFICIE';
+    }
+
+    let unitList = adminShips; // Default
+    if (currentForce === 'AVIACION') unitList = adminAir;
+    else if (currentForce === 'SUBMARINOS') unitList = adminSub;
+    else if (currentForce === 'INFANTERIA') unitList = adminInf;
+    else if (currentForce === 'GUARDACOSTAS') unitList = adminGuard;
+
     if (sP) sP.innerHTML = dbLIUNTAS.map(l => `<option value="${l.code}">${l.code} - ${l.name}</option>`).join('');
     if (sE) sE.innerHTML = dbEjercicios.map(e => `<option value="${e.name}">${e.name} (${e.untlCode})</option>`).join('');
-    if (sS) sS.innerHTML = adminShips.map(s => `<option value="${s}">${s}</option>`).join('');
-    if (sC) sC.innerHTML = adminShips.map(s => `<option value="${s}">${s}</option>`).join('');
+    if (sS) sS.innerHTML = unitList.map(s => `<option value="${s}">${s}</option>`).join('');
+    if (sC) sC.innerHTML = unitList.map(s => `<option value="${s}">${s}</option>`).join('');
 
     updateResumenSelector();
     updateIntegralOpSelector();
@@ -1530,17 +1575,32 @@ function updateOperationStatusUI() {
 }
 
 function prepareNewOperation() {
-    if (!confirm("¿Está seguro de iniciar una NUEVA OPERACIÓN?\nEsto limpiará la configuración actual de tareas y ejercicios para permitir el ingreso de nueva información.")) {
+    if (!confirm("¿Está seguro de iniciar una NUEVA OPERACIÓN?\nEsto limpiará COMPLETAMENTE el sistema (Tareas, Ejercicios, Buques, Evaluaciones y Costos) para permitir el ingreso de nueva información.")) {
         return;
     }
 
-    // Resetear datos de configuración
+    // Resetear variables en memoria
     dbLIUNTAS = [];
     dbEjercicios = [];
+    logs = [];
+    adminShips = [];
+    adminAir = [];
+    adminSub = [];
+    adminInf = [];
+    adminGuard = [];
 
-    // Resetear metadatos de operación
+    // Resetear LocalStorage
     localStorage.setItem('v16_liuntas', JSON.stringify(dbLIUNTAS));
     localStorage.setItem('v16_ex', JSON.stringify(dbEjercicios));
+    localStorage.setItem('v16_logs', JSON.stringify(logs));
+    localStorage.setItem('v16_costos', JSON.stringify([]));
+    localStorage.setItem('admin_ships', JSON.stringify([]));
+    localStorage.setItem('admin_air', JSON.stringify([]));
+    localStorage.setItem('admin_sub', JSON.stringify([]));
+    localStorage.setItem('admin_inf', JSON.stringify([]));
+    localStorage.setItem('admin_guard', JSON.stringify([]));
+
+    // Resetear metadatos de operación
     localStorage.setItem('v16_opName', "");
     localStorage.setItem('v16_opMission', "");
     localStorage.setItem('v16_opStatus', 'OPEN');
@@ -1548,7 +1608,7 @@ function prepareNewOperation() {
     // Sincronizar cambios si el archivo está vinculado
     saveToFile();
 
-    alert("Sistema preparado para nueva información. Se reiniciará la página.");
+    alert("Sistema (incluyendo buques) reiniciado con éxito. Se recargará la página.");
     location.reload();
 }
 window.onload = () => {
@@ -1802,6 +1862,170 @@ function delShip(i) {
     logAction("Eliminó buque");
     renderShips();
     refreshSelectors();
+    saveToFile();
+}
+
+// GESTIÓN AERONAVES
+function addAir() {
+    if (getUserRole() !== ROLES.ADMIN) return;
+    const idx = parseInt(document.getElementById("editAirIndex").value);
+    const input = document.getElementById("newAir");
+    const name = input.value.trim().toUpperCase();
+    if (!name) return;
+    if (idx === -1) {
+        adminAir.push(name);
+        logAction("Agregó aeronave " + name);
+    } else {
+        adminAir[idx] = name;
+        logAction("Editó aeronave a " + name);
+    }
+    localStorage.setItem("admin_air", JSON.stringify(adminAir));
+    document.getElementById("editAirIndex").value = -1;
+    input.value = "";
+    renderAir();
+    saveToFile();
+}
+function renderAir() {
+    const tbl = document.getElementById("tblAir");
+    if (!tbl) return;
+    tbl.innerHTML = adminAir.map((s, i) => `
+    <tr><td>${s}</td><td>
+        <button class="btn btn-edit" onclick="editAir(${i})">Editar</button>
+        <button class="btn btn-danger" onclick="delAir(${i})">X</button>
+    </td></tr>`).join('');
+}
+function editAir(i) {
+    document.getElementById("newAir").value = adminAir[i];
+    document.getElementById("editAirIndex").value = i;
+}
+function delAir(i) {
+    if (getUserRole() !== ROLES.ADMIN || !confirm("¿Eliminar aeronave?")) return;
+    adminAir.splice(i, 1);
+    localStorage.setItem("admin_air", JSON.stringify(adminAir));
+    renderAir();
+    saveToFile();
+}
+
+// GESTIÓN SUBMARINOS
+function addSub() {
+    if (getUserRole() !== ROLES.ADMIN) return;
+    const idx = parseInt(document.getElementById("editSubIndex").value);
+    const input = document.getElementById("newSub");
+    const name = input.value.trim().toUpperCase();
+    if (!name) return;
+    if (idx === -1) {
+        adminSub.push(name);
+        logAction("Agregó submarino " + name);
+    } else {
+        adminSub[idx] = name;
+        logAction("Editó submarino a " + name);
+    }
+    localStorage.setItem("admin_sub", JSON.stringify(adminSub));
+    document.getElementById("editSubIndex").value = -1;
+    input.value = "";
+    renderSub();
+    saveToFile();
+}
+function renderSub() {
+    const tbl = document.getElementById("tblSub");
+    if (!tbl) return;
+    tbl.innerHTML = adminSub.map((s, i) => `
+    <tr><td>${s}</td><td>
+        <button class="btn btn-edit" onclick="editSub(${i})">Editar</button>
+        <button class="btn btn-danger" onclick="delSub(${i})">X</button>
+    </td></tr>`).join('');
+}
+function editSub(i) {
+    document.getElementById("newSub").value = adminSub[i];
+    document.getElementById("editSubIndex").value = i;
+}
+function delSub(i) {
+    if (getUserRole() !== ROLES.ADMIN || !confirm("¿Eliminar submarino?")) return;
+    adminSub.splice(i, 1);
+    localStorage.setItem("admin_sub", JSON.stringify(adminSub));
+    renderSub();
+    saveToFile();
+}
+
+// GESTIÓN INFANTERÍA
+function addInf() {
+    if (getUserRole() !== ROLES.ADMIN) return;
+    const idx = parseInt(document.getElementById("editInfIndex").value);
+    const input = document.getElementById("newInf");
+    const name = input.value.trim().toUpperCase();
+    if (!name) return;
+    if (idx === -1) {
+        adminInf.push(name);
+        logAction("Agregó unidad infantería " + name);
+    } else {
+        adminInf[idx] = name;
+        logAction("Editó unidad infantería a " + name);
+    }
+    localStorage.setItem("admin_inf", JSON.stringify(adminInf));
+    document.getElementById("editInfIndex").value = -1;
+    input.value = "";
+    renderInf();
+    saveToFile();
+}
+function renderInf() {
+    const tbl = document.getElementById("tblInf");
+    if (!tbl) return;
+    tbl.innerHTML = adminInf.map((s, i) => `
+    <tr><td>${s}</td><td>
+        <button class="btn btn-edit" onclick="editInf(${i})">Editar</button>
+        <button class="btn btn-danger" onclick="delInf(${i})">X</button>
+    </td></tr>`).join('');
+}
+function editInf(i) {
+    document.getElementById("newInf").value = adminInf[i];
+    document.getElementById("editInfIndex").value = i;
+}
+function delInf(i) {
+    if (getUserRole() !== ROLES.ADMIN || !confirm("¿Eliminar unidad?")) return;
+    adminInf.splice(i, 1);
+    localStorage.setItem("admin_inf", JSON.stringify(adminInf));
+    renderInf();
+    saveToFile();
+}
+
+// GESTIÓN GUARDACOSTAS
+function addGuard() {
+    if (getUserRole() !== ROLES.ADMIN) return;
+    const idx = parseInt(document.getElementById("editGuardIndex").value);
+    const input = document.getElementById("newGuard");
+    const name = input.value.trim().toUpperCase();
+    if (!name) return;
+    if (idx === -1) {
+        adminGuard.push(name);
+        logAction("Agregó unidad guardacostas " + name);
+    } else {
+        adminGuard[idx] = name;
+        logAction("Editó unidad guardacostas a " + name);
+    }
+    localStorage.setItem("admin_guard", JSON.stringify(adminGuard));
+    document.getElementById("editGuardIndex").value = -1;
+    input.value = "";
+    renderGuard();
+    saveToFile();
+}
+function renderGuard() {
+    const tbl = document.getElementById("tblGuard");
+    if (!tbl) return;
+    tbl.innerHTML = adminGuard.map((s, i) => `
+    <tr><td>${s}</td><td>
+        <button class="btn btn-edit" onclick="editGuard(${i})">Editar</button>
+        <button class="btn btn-danger" onclick="delGuard(${i})">X</button>
+    </td></tr>`).join('');
+}
+function editGuard(i) {
+    document.getElementById("newGuard").value = adminGuard[i];
+    document.getElementById("editGuardIndex").value = i;
+}
+function delGuard(i) {
+    if (getUserRole() !== ROLES.ADMIN || !confirm("¿Eliminar unidad guardacostas?")) return;
+    adminGuard.splice(i, 1);
+    localStorage.setItem("admin_guard", JSON.stringify(adminGuard));
+    renderGuard();
     saveToFile();
 }
 
@@ -2165,8 +2389,41 @@ function generateReportGlobal() {
 
 // ================= RESUMEN INTEGRAL (NUEVO) =================
 let currentResumenForce = 'superficie';
+let currentMando = 'COOPNA';
 let chartResumenForceEficaciaRef = null;
 let chartResumenForceEficienciaRef = null;
+
+function showCOOPNASummary(el) {
+    currentMando = 'COOPNA';
+    const title = document.getElementById('resumenIntegralTitle');
+    if (title) title.innerText = 'RESUMEN INTEGRAL - COOPNA';
+
+    // Mostrar fuerzas de COOPNA, ocultar Guardacostas
+    if (document.getElementById('btn-force-superficie')) document.getElementById('btn-force-superficie').style.display = 'block';
+    if (document.getElementById('btn-force-submarinos')) document.getElementById('btn-force-submarinos').style.display = 'block';
+    if (document.getElementById('btn-force-aviacion')) document.getElementById('btn-force-aviacion').style.display = 'block';
+    if (document.getElementById('btn-force-infanteria')) document.getElementById('btn-force-infanteria').style.display = 'block';
+    if (document.getElementById('btn-force-guardacostas')) document.getElementById('btn-force-guardacostas').style.display = 'none';
+
+    setResumenForce('superficie');
+    showMainSection('operacional-resumen', el);
+}
+
+function showDIRNEASummary(el) {
+    currentMando = 'DIRNEA';
+    const title = document.getElementById('resumenIntegralTitle');
+    if (title) title.innerText = 'RESUMEN INTEGRAL - DIRNEA (GUARDACOSTAS)';
+
+    // Mostrar solo Guardacostas
+    if (document.getElementById('btn-force-superficie')) document.getElementById('btn-force-superficie').style.display = 'none';
+    if (document.getElementById('btn-force-submarinos')) document.getElementById('btn-force-submarinos').style.display = 'none';
+    if (document.getElementById('btn-force-aviacion')) document.getElementById('btn-force-aviacion').style.display = 'none';
+    if (document.getElementById('btn-force-infanteria')) document.getElementById('btn-force-infanteria').style.display = 'none';
+    if (document.getElementById('btn-force-guardacostas')) document.getElementById('btn-force-guardacostas').style.display = 'block';
+
+    setResumenForce('guardacostas');
+    showMainSection('operacional-resumen', el);
+}
 
 function setResumenForce(force) {
     currentResumenForce = force;
@@ -2197,13 +2454,16 @@ function renderOperationalSummary() {
     const opSel = integralOp || localStorage.getItem('v16_opName') || '';
 
     // Data Gathering
-    // We only have real data for 'superficie'. For others, mock or empty.
     let units = []; // [{ name, eficacia: 0-100, eficiencia: 0-100 }]
 
-    if (currentResumenForce === 'superficie') {
+    if (currentMando === 'DIRNEA') {
+        // Resumen DIRNEA en 0 por estar en desarrollo
+        units = [];
+    } else {
         const opLogs = logs.filter(l => l.opName === opSel);
         const costos = JSON.parse(localStorage.getItem('v16_costos')) || [];
 
+        // Rest of the gathering logic...
         const allShipTimes = adminShips.map(b => {
             const logs = opLogs.filter(l => l.ship === b);
             return logs.reduce((sum, l) => sum + (l.time || 0), 0);
@@ -2253,9 +2513,6 @@ function renderOperationalSummary() {
         });
         // Filtrar participantes para el promedio de fuerza
         units = units.filter(u => u.participo);
-    } else {
-        // Other forces: EMPTY for now
-        units = [];
     }
 
     // Force Metrics
@@ -2274,6 +2531,13 @@ function renderOperationalSummary() {
 
     const eficEl = document.getElementById('resumenForceEficiencia');
     if (eficEl) eficEl.innerText = avgEficiencia + "%";
+
+    // CÁLCULO IDO POR FUERZA
+    const idoForceVal = (parseFloat(avgEficacia) * 0.6) + (parseFloat(avgEficiencia) * 0.4);
+    const idoForceEl = document.getElementById('resumenForceIDO');
+    if (idoForceEl) {
+        idoForceEl.innerText = idoForceVal.toFixed(1) + "%";
+    }
 
     // View Logic
     const contentDiv = document.getElementById('resumenDashboardContent');
@@ -2306,7 +2570,8 @@ function renderOperationalSummary() {
         const tbody = document.querySelector('#tblResumenForce tbody');
         if (tbody) {
             if (units.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No hay unidades registradas para esta fuerza.</td></tr>';
+                const msg = currentMando === 'DIRNEA' ? 'Módulo Guardacostas se encuentra en fase de desarrollo.' : 'No hay unidades registradas para esta fuerza.';
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">${msg}</td></tr>`;
             } else {
                 tbody.innerHTML = units.map(u => {
                     const est = u.eficacia >= 80 ? 'ÓPTIMO' : (u.eficacia >= 70 ? 'RESTRINGIDO' : 'CRÍTICO');
@@ -2442,10 +2707,12 @@ function renderHistoricalReport() {
         let totalCost = 0;
         let sumEficacia = 0;
         let sumEficiencia = 0;
+        let sumIDO = 0;
         let filas = '';
         const labels = [];
         const dataEficacia = [];
         const dataEficiencia = [];
+        const dataIDO = [];
         const dataCostos = [];
 
         ops.forEach(op => {
@@ -2454,10 +2721,12 @@ function renderHistoricalReport() {
             totalCost += opStats.totalCost;
             sumEficacia += opStats.eficacia;
             sumEficiencia += opStats.eficiencia;
+            sumIDO += opStats.ido;
 
             labels.push(op);
             dataEficacia.push(opStats.eficacia);
             dataEficiencia.push(opStats.eficiencia);
+            dataIDO.push(opStats.ido);
             dataCostos.push(opStats.totalCost);
 
             filas += `
@@ -2466,6 +2735,7 @@ function renderHistoricalReport() {
                      <td>${opStats.lastDate || '-'}</td>
                      <td>${opStats.eficacia}%</td>
                      <td>${opStats.eficiencia}%</td>
+                     <td><b>${opStats.ido}%</b></td>
                      <td>$${opStats.totalCost.toLocaleString('es-ES')}</td>
                  </tr>
              `;
@@ -2473,6 +2743,7 @@ function renderHistoricalReport() {
 
         const avgEficaciaGlobal = (sumEficacia / ops.length).toFixed(1);
         const avgEficienciaGlobal = (sumEficiencia / ops.length).toFixed(2);
+        const avgIDOGlobal = (sumIDO / ops.length).toFixed(2);
 
         container.innerHTML = `
             <h4 style="color:var(--navy); border-bottom:1px solid #ccc; padding-bottom:5px;">CONSOLIDADO DE OPERACIONES</h4>
@@ -2493,6 +2764,10 @@ function renderHistoricalReport() {
                     <small>Eficiencia Media</small>
                     <div style="font-size:1.2rem; font-weight:bold; color:var(--success);">${avgEficienciaGlobal}%</div>
                 </div>
+                <div class="card" style="text-align:center; background:white; border-bottom: 3px solid #805ad5;">
+                    <small>IDO Global</small>
+                    <div style="font-size:1.2rem; font-weight:bold; color:#805ad5;">${avgIDOGlobal}%</div>
+                </div>
             </div>
 
             <div class="card" style="margin-bottom:20px;">
@@ -2506,6 +2781,7 @@ function renderHistoricalReport() {
                         <th>Última Fecha</th>
                         <th>Eficacia Media</th>
                         <th>Eficiencia Media</th>
+                        <th>IDO</th>
                         <th>Costo Total</th>
                     </tr>
                 </thead>
@@ -2514,7 +2790,7 @@ function renderHistoricalReport() {
         `;
 
         setTimeout(() => {
-            renderHistoryConsolidadoChart(labels, dataEficacia, dataEficiencia, dataCostos);
+            renderHistoryConsolidadoChart(labels, dataEficacia, dataEficiencia, dataIDO, dataCostos);
         }, 100);
 
     } else {
@@ -2524,7 +2800,7 @@ function renderHistoricalReport() {
         container.innerHTML = `
             <h4 style="color:var(--navy); border-bottom:1px solid #ccc; padding-bottom:5px;">REPORTE DE OPERACIÓN: ${opSel}</h4>
             
-            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:20px;">
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-bottom:20px;">
                 <div style="background:white; padding:10px; border-radius:5px; text-align:center;">
                     <div style="color:gray;">Eficacia Global</div>
                     <div style="font-size:1.8rem; font-weight:bold; color:var(--navy);">${stats.eficacia}%</div>
@@ -2532,6 +2808,10 @@ function renderHistoricalReport() {
                 <div style="background:white; padding:10px; border-radius:5px; text-align:center;">
                     <div style="color:gray;">Eficiencia Global</div>
                     <div style="font-size:1.8rem; font-weight:bold; color:var(--navy);">${stats.eficiencia}%</div>
+                </div>
+                <div style="background:white; padding:10px; border-radius:5px; text-align:center;">
+                    <div style="color:gray;">IDO</div>
+                    <div style="font-size:1.8rem; font-weight:bold; color:#805ad5;">${stats.ido}%</div>
                 </div>
                 <div style="background:white; padding:10px; border-radius:5px; text-align:center;">
                     <div style="color:gray;">Costo Total</div>
@@ -2643,6 +2923,9 @@ function calculateOpStats(opName) {
     const avgEficacia = participants.length > 0 ? participants.reduce((a, b) => a + b.eficacia, 0) / participants.length : 0;
     const avgEficiencia = participants.length > 0 ? participants.reduce((a, b) => a + b.eficiencia, 0) / participants.length : 0;
 
+    // Calcular IDO (Índice de Desempeño Operativo)
+    const ido = (avgEficacia * 0.6) + (avgEficiencia * 0.4);
+
     // Obtener última fecha
     const dates = opLogs.map(l => l.date).sort();
     const lastDate = dates.length > 0 ? dates[dates.length - 1] : '';
@@ -2650,6 +2933,7 @@ function calculateOpStats(opName) {
     return {
         eficacia: parseFloat(avgEficacia.toFixed(1)),
         eficiencia: parseFloat(avgEficiencia.toFixed(2)),
+        ido: parseFloat(ido.toFixed(2)),
         totalCost: totalCost,
         totalTime: shipDetails.reduce((a, b) => a + b.time, 0),
         lastDate: lastDate,
@@ -2691,12 +2975,12 @@ function printHistoricalReport() {
         const ops = [...new Set(logs.map(l => l.opName))].filter(Boolean);
         const data = ops.map(op => {
             const st = calculateOpStats(op);
-            return [op, st.lastDate, st.eficacia + '%', st.eficiencia + '%', '$' + st.totalCost.toLocaleString()];
+            return [op, st.lastDate, st.eficacia + '%', st.eficiencia + '%', st.ido + '%', '$' + st.totalCost.toLocaleString()];
         });
 
         doc.autoTable({
             startY: yPos,
-            head: [['Operación', 'Fecha', 'Eficacia', 'Eficiencia', 'Costo T.']],
+            head: [['Operación', 'Fecha', 'Eficacia', 'Eficiencia', 'IDO', 'Costo T.']],
             body: data
         });
 
@@ -2708,6 +2992,8 @@ function printHistoricalReport() {
         doc.text(`Eficacia Global: ${st.eficacia}%`, 20, yPos);
         yPos += 8;
         doc.text(`Eficiencia Global: ${st.eficiencia}%`, 20, yPos);
+        yPos += 8;
+        doc.text(`IDO: ${st.ido}%`, 20, yPos);
         yPos += 8;
         doc.text(`Costo Total: $${st.totalCost.toLocaleString()}`, 20, yPos);
         yPos += 10;
@@ -2746,7 +3032,7 @@ function printHistoricalReport() {
 }
 
 let chartHistoryConsolidadoRef = null;
-function renderHistoryConsolidadoChart(labels, eficacias, eficiencias, costos) {
+function renderHistoryConsolidadoChart(labels, eficacias, eficiencias, idos, costos) {
     const ctx = document.getElementById('chartHistoryConsolidado');
     if (!ctx) return;
 
@@ -2761,13 +3047,22 @@ function renderHistoryConsolidadoChart(labels, eficacias, eficiencias, costos) {
                     label: 'Eficacia (%)',
                     data: eficacias,
                     backgroundColor: '#1a365d',
-                    yAxisID: 'y'
+                    yAxisID: 'y',
+                    order: 1
                 },
                 {
                     label: 'Eficiencia (%)',
                     data: eficiencias,
                     backgroundColor: '#2f855a',
-                    yAxisID: 'y'
+                    yAxisID: 'y',
+                    order: 1
+                },
+                {
+                    label: 'IDO (%)',
+                    data: idos,
+                    backgroundColor: '#805ad5',
+                    yAxisID: 'y',
+                    order: 1
                 },
                 {
                     label: 'Costo ($)',
@@ -2777,7 +3072,8 @@ function renderHistoryConsolidadoChart(labels, eficacias, eficiencias, costos) {
                     borderWidth: 2,
                     pointBackgroundColor: '#c53030',
                     fill: false,
-                    yAxisID: 'y1'
+                    yAxisID: 'y1',
+                    order: 0
                 }
             ]
         },
