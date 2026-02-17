@@ -2830,6 +2830,7 @@ function renderHistoricalReport() {
                     <th>Buque</th>
                     <th>Eficacia</th>
                     <th>Eficiencia</th>
+                    <th>IDO</th>
                     <th>Costo</th>
                 </thead>
                 <tbody>
@@ -2838,6 +2839,7 @@ function renderHistoricalReport() {
                             <td>${d.name}</td>
                             <td>${d.eficacia}%</td>
                             <td>${d.eficiencia}%</td>
+                            <td><b>${d.ido}%</b></td>
                             <td>$${d.costo.toLocaleString('es-ES')}</td>
                         </tr>
                     `).join('')}
@@ -2914,8 +2916,12 @@ function calculateOpStats(opName) {
 
         s.eficiencia = ef + (tScore * 0.25) + (cScore * 0.25);
 
+        // Calcular IDO por unidad
+        s.ido = (s.eficacia * 0.6) + (s.eficiencia * 0.4);
+
         s.eficacia = parseFloat(s.eficacia.toFixed(1));
         s.eficiencia = parseFloat(s.eficiencia.toFixed(2));
+        s.ido = parseFloat(s.ido.toFixed(2));
     });
 
     const participants = shipDetails.filter(s => s.eficacia > 0 || s.costo > 0 || s.time > 0);
@@ -3123,13 +3129,22 @@ function renderHistoryOpChart(details) {
                     label: 'Eficacia (%)',
                     data: details.map(d => d.eficacia),
                     backgroundColor: '#1a365d',
-                    yAxisID: 'y'
+                    yAxisID: 'y',
+                    order: 1
                 },
                 {
                     label: 'Eficiencia (%)',
                     data: details.map(d => d.eficiencia),
                     backgroundColor: '#2f855a',
-                    yAxisID: 'y'
+                    yAxisID: 'y',
+                    order: 1
+                },
+                {
+                    label: 'IDO (%)',
+                    data: details.map(d => d.ido),
+                    backgroundColor: '#805ad5',
+                    yAxisID: 'y',
+                    order: 1
                 },
                 {
                     label: 'Costo ($)',
@@ -3139,7 +3154,8 @@ function renderHistoryOpChart(details) {
                     borderWidth: 2,
                     pointBackgroundColor: '#c53030',
                     fill: false,
-                    yAxisID: 'y1'
+                    yAxisID: 'y1',
+                    order: 0
                 }
             ]
         },
